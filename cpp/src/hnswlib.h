@@ -23,27 +23,18 @@
 
 #pragma once
 #ifndef NO_MANUAL_VECTORIZATION
-#ifdef __SSE__
-#define USE_SSE
-#ifdef __AVX__
-#define USE_AVX
-#ifdef __AVX512F__
-#define USE_AVX512
-#endif
-#endif
+#if defined(__i386__) || defined(__x86_64__)
+#define USE_SIMD_DISPATCHER
 #endif
 #endif
 
-#if defined(USE_AVX) || defined(USE_SSE)
+#ifdef USE_SIMD_DISPATCHER
 #ifdef _MSC_VER
 #include <intrin.h>
 #include <stdexcept>
 #else
 #include <x86intrin.h>
 #endif
-
-#if defined(USE_AVX512)
-#include <immintrin.h>
 #endif
 
 #if defined(__GNUC__)
@@ -52,7 +43,6 @@
 #else
 #define PORTABLE_ALIGN32 __declspec(align(32))
 #define PORTABLE_ALIGN64 __declspec(align(64))
-#endif
 #endif
 
 #include "StreamUtils.h"

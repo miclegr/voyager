@@ -23,7 +23,10 @@
 
 #pragma once
 #include "Space.h"
+#include "../simd_utils.h"
 #include <ratio>
+
+//#define USE_SIMD_DISPATCHER
 
 namespace hnswlib {
 /**
@@ -62,10 +65,9 @@ static dist_t L2SqrAtLeast(const data_t *__restrict pVect1,
                                                remainder);
 }
 
-#if defined(USE_AVX512)
+#ifdef USE_SIMD_DISPATCHER
 
-// Favor using AVX512 if available.
-static float L2SqrSIMD16Ext(const float *pVect1, const float *pVect2,
+static float __attribute__((target("avx512f"))) L2SqrAVX512F16Ext(const float *pVect1, const float *pVect2,
                             const size_t qty) {
   float PORTABLE_ALIGN64 TmpRes[16];
   size_t qty16 = qty >> 4;
@@ -94,10 +96,8 @@ static float L2SqrSIMD16Ext(const float *pVect1, const float *pVect2,
   return (res);
 }
 
-#elif defined(USE_AVX)
 
-// Favor using AVX if available.
-static float L2SqrSIMD16Ext(const float *pVect1, const float *pVect2,
+static float __attribute__((target("avx,avx2,fma"))) L2SqrAVX16Ext(const float *__restrict pVect1, const float *__restrict pVect2,
                             const size_t qty) {
   float PORTABLE_ALIGN32 TmpRes[8];
   size_t qty16 = qty >> 4;
@@ -113,14 +113,14 @@ static float L2SqrSIMD16Ext(const float *pVect1, const float *pVect2,
     v2 = _mm256_loadu_ps(pVect2);
     pVect2 += 8;
     diff = _mm256_sub_ps(v1, v2);
-    sum = _mm256_add_ps(sum, _mm256_mul_ps(diff, diff));
+    sum = _mm256_fmadd_ps(diff, diff, sum);  
 
     v1 = _mm256_loadu_ps(pVect1);
     pVect1 += 8;
     v2 = _mm256_loadu_ps(pVect2);
     pVect2 += 8;
     diff = _mm256_sub_ps(v1, v2);
-    sum = _mm256_add_ps(sum, _mm256_mul_ps(diff, diff));
+    sum = _mm256_fmadd_ps(diff, diff, sum);  
   }
 
   _mm256_store_ps(TmpRes, sum);
@@ -128,9 +128,7 @@ static float L2SqrSIMD16Ext(const float *pVect1, const float *pVect2,
          TmpRes[6] + TmpRes[7];
 }
 
-#elif defined(USE_SSE)
-
-static float L2SqrSIMD16Ext(const float *pVect1, const float *pVect2,
+static float L2SqrSSE16Ext(const float *pVect1, const float *pVect2,
                             const size_t qty) {
   float PORTABLE_ALIGN32 TmpRes[8];
   size_t qty16 = qty >> 4;
@@ -174,55 +172,40 @@ static float L2SqrSIMD16Ext(const float *pVect1, const float *pVect2,
   _mm_store_ps(TmpRes, sum);
   return TmpRes[0] + TmpRes[1] + TmpRes[2] + TmpRes[3];
 }
-#endif
 
-#if defined(USE_SSE) || defined(USE_AVX) || defined(USE_AVX512)
-static float L2SqrSIMD16ExtResiduals(const float *pVect1, const float *pVect2,
+static float __attribute__((target("avx512f"))) L2SqrAVX512F16ExtResiduals(const float *pVect1, const float *pVect2,
                                      const size_t qty) {
   size_t qty16 = qty >> 4 << 4;
-  float res = L2SqrSIMD16Ext(pVect1, pVect2, qty16);
+  float res = L2SqrAVX512F16Ext(pVect1, pVect2, qty16);
 
   size_t qty_left = qty - qty16;
   float res_tail =
       L2Sqr<float, float>(pVect1 + qty16, pVect2 + qty16, qty_left);
   return (res + res_tail);
 }
-#endif
 
-#ifdef USE_SSE
-static float L2SqrSIMD4Ext(const float *pVect1, const float *pVect2,
-                           const size_t qty) {
-  float PORTABLE_ALIGN32 TmpRes[8];
-  size_t qty4 = qty >> 2;
+static float __attribute__((target("avx,avx2,fma"))) L2SqrAVX16ExtResiduals(const float *pVect1, const float *pVect2,
+                                     const size_t qty) {
+  size_t qty16 = qty >> 4 << 4;
+  float res = L2SqrAVX16Ext(pVect1, pVect2, qty16);
 
-  const float *pEnd1 = pVect1 + (qty4 << 2);
-
-  __m128 diff, v1, v2;
-  __m128 sum = _mm_set1_ps(0);
-
-  while (pVect1 < pEnd1) {
-    v1 = _mm_loadu_ps(pVect1);
-    pVect1 += 4;
-    v2 = _mm_loadu_ps(pVect2);
-    pVect2 += 4;
-    diff = _mm_sub_ps(v1, v2);
-    sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
-  }
-  _mm_store_ps(TmpRes, sum);
-  return TmpRes[0] + TmpRes[1] + TmpRes[2] + TmpRes[3];
-}
-
-static float L2SqrSIMD4ExtResiduals(const float *pVect1, const float *pVect2,
-                                    const size_t qty) {
-  size_t qty4 = qty >> 2 << 2;
-
-  float res = L2SqrSIMD4Ext(pVect1, pVect2, qty4);
-  size_t qty_left = qty - qty4;
-
-  float res_tail = L2Sqr<float, float>(pVect1 + qty4, pVect2 + qty4, qty_left);
-
+  size_t qty_left = qty - qty16;
+  float res_tail =
+      L2Sqr<float, float>(pVect1 + qty16, pVect2 + qty16, qty_left);
   return (res + res_tail);
 }
+
+static float L2SqrSSE16ExtResiduals(const float *pVect1, const float *pVect2,
+                                     const size_t qty) {
+  size_t qty16 = qty >> 4 << 4;
+  float res = L2SqrSSE16Ext(pVect1, pVect2, qty16);
+
+  size_t qty_left = qty - qty16;
+  float res_tail =
+      L2Sqr<float, float>(pVect1 + qty16, pVect2 + qty16, qty_left);
+  return (res + res_tail);
+}
+
 #endif
 
 template <typename dist_t, typename data_t = dist_t,
@@ -276,15 +259,11 @@ template <>
 EuclideanSpace<float, float>::EuclideanSpace(size_t dim)
     : data_size_(dim * sizeof(float)), dim_(dim) {
   fstdistfunc_ = L2Sqr<float, float>;
-#if defined(USE_SSE) || defined(USE_AVX) || defined(USE_AVX512)
+#ifdef USE_SIMD_DISPATCHER
   if (dim % 16 == 0)
-    fstdistfunc_ = L2SqrSIMD16Ext;
-  else if (dim % 4 == 0)
-    fstdistfunc_ = L2SqrSIMD4Ext;
+    fstdistfunc_ = x86_simd_dispatch(L2SqrAVX512F16Ext, L2SqrAVX16Ext, L2SqrSSE16Ext);
   else if (dim > 16)
-    fstdistfunc_ = L2SqrSIMD16ExtResiduals;
-  else if (dim > 4)
-    fstdistfunc_ = L2SqrSIMD4ExtResiduals;
+    fstdistfunc_ = x86_simd_dispatch(L2SqrAVX512F16ExtResiduals, L2SqrAVX16ExtResiduals, L2SqrSSE16ExtResiduals);
 #endif
 }
 } // namespace hnswlib
