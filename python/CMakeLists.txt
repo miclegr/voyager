@@ -59,7 +59,7 @@ endif()
 
 # Relase build with all optimizations
 if (CMAKE_BUILD_TYPE STREQUAL "Release" AND IS_UNIX)
-  add_compile_options(-O3)
+  add_compile_options(-O3 -g)
 elseif (CMAKE_BUILD_TYPE STREQUAL "Release" AND IS_WINDOWS)
   add_compile_options(/Ox)
 endif()
@@ -77,7 +77,7 @@ nanobind_add_module(
   # Target the stable ABI for Python 3.12+, which reduces
   # the number of binary wheels that must be built. This
   # does nothing on older Python versions
-  NB_STATIC STABLE_ABI LTO FREE_THREADED NOMINSIZE
+  NB_STATIC STABLE_ABI LTO FREE_THREADED NOMINSIZE NOSTRIP
   # Sources:
   src/bindings.cpp
 )

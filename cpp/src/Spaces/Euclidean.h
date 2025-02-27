@@ -23,7 +23,10 @@
 
 #pragma once
 #include "Space.h"
+#include "../simd_utils.h"
 #include <ratio>
+
+//#define USE_SIMD_DISPATCHER
 
 namespace hnswlib {
 /**
@@ -62,167 +65,78 @@ static dist_t L2SqrAtLeast(const data_t *__restrict pVect1,
                                                remainder);
 }
 
-#if defined(USE_AVX512)
 
-// Favor using AVX512 if available.
-static float L2SqrSIMD16Ext(const float *pVect1, const float *pVect2,
-                            const size_t qty) {
-  float PORTABLE_ALIGN64 TmpRes[16];
-  size_t qty16 = qty >> 4;
 
-  const float *pEnd1 = pVect1 + (qty16 << 4);
 
-  __m512 diff, v1, v2;
-  __m512 sum = _mm512_set1_ps(0);
 
-  while (pVect1 < pEnd1) {
-    v1 = _mm512_loadu_ps(pVect1);
-    pVect1 += 16;
-    v2 = _mm512_loadu_ps(pVect2);
-    pVect2 += 16;
-    diff = _mm512_sub_ps(v1, v2);
+template <SIMD_ARCH s, typename data_t, typename scalefactor = std::ratio<1, 1>>
+static float L2SqrSimd(const data_t *__restrict pVect1,
+                    const data_t *__restrict pVect2, const size_t qty) {
+  dist_t res = 0;
+
+  static_assert(qty % SimdType<s>::inner_loop_lenght == 0, "");
+
+  SimdType<s>::vector accumulator = new_accumulator<s>()
+
+  for (size_t i = 0; i < qty / SimdType<s>::inner_loop_lenght; i++) {
+
+    SimdType<s>::vector v1 = convert_to_float_vector(pVect1);
+    SimdType<s>::vector v2 = convert_to_float_vector(pVect2);
+
+    if constexpr (s == SSE) {
+      L2SqrSSEInnerLoop(v1, v2, accumulator);
+    } else if constexpr (s == AVX2) {
+      L2SqrAVX2InnerLoop(v1, v2, accumulator);
+    } else if constexpr (s == AVX512) {
+      L2SqrAVX512FInnerLoop(v1, v2, accumulator);
+    }
+
+    pVect1+=SimdType<s>::inner_loop_lenght;
+    pVect2+=SimdType<s>::inner_loop_lenght;
+
+  }
+
+  float res = collapse_accumulator(accumulator);
+  constexpr dist_t scale = (dist_t)scalefactor::num / (dist_t)scalefactor::den;
+  return (res * scale * scale);
+}
+
+
+static __attribute__((target("avx512f"))) L2SqrAVX512FInnerLoop(SimdType<AVX512>::vector v1, SimdType<AVX512> v2, SimdType<AVX512> accumulator) {
+    SimdType<AVX512> diff = _mm512_sub_ps(v1, v2);
     // sum = _mm512_fmadd_ps(diff, diff, sum);
-    sum = _mm512_add_ps(sum, _mm512_mul_ps(diff, diff));
+    return _mm512_add_ps(accumulator, _mm512_mul_ps(diff, diff));
   }
 
-  _mm512_store_ps(TmpRes, sum);
-  float res = TmpRes[0] + TmpRes[1] + TmpRes[2] + TmpRes[3] + TmpRes[4] +
-              TmpRes[5] + TmpRes[6] + TmpRes[7] + TmpRes[8] + TmpRes[9] +
-              TmpRes[10] + TmpRes[11] + TmpRes[12] + TmpRes[13] + TmpRes[14] +
-              TmpRes[15];
-
-  return (res);
-}
-
-#elif defined(USE_AVX)
-
-// Favor using AVX if available.
-static float L2SqrSIMD16Ext(const float *pVect1, const float *pVect2,
-                            const size_t qty) {
-  float PORTABLE_ALIGN32 TmpRes[8];
-  size_t qty16 = qty >> 4;
-
-  const float *pEnd1 = pVect1 + (qty16 << 4);
-
-  __m256 diff, v1, v2;
-  __m256 sum = _mm256_set1_ps(0);
-
-  while (pVect1 < pEnd1) {
-    v1 = _mm256_loadu_ps(pVect1);
-    pVect1 += 8;
-    v2 = _mm256_loadu_ps(pVect2);
-    pVect2 += 8;
-    diff = _mm256_sub_ps(v1, v2);
-    sum = _mm256_add_ps(sum, _mm256_mul_ps(diff, diff));
-
-    v1 = _mm256_loadu_ps(pVect1);
-    pVect1 += 8;
-    v2 = _mm256_loadu_ps(pVect2);
-    pVect2 += 8;
-    diff = _mm256_sub_ps(v1, v2);
-    sum = _mm256_add_ps(sum, _mm256_mul_ps(diff, diff));
+static __attribute__((target("avx,avx2,fma"))) L2SqrAVX2InnerLoop(SimdType<AVX2>::vector v1, SimdType<AVX2> v2, SimdType<AVX2> accumulator) {
+    SimdType<AVX2> diff = _mm256_sub_ps(v1, v2);
+    return _mm256_fmadd_ps(diff, diff, accumulator);  
   }
 
-  _mm256_store_ps(TmpRes, sum);
-  return TmpRes[0] + TmpRes[1] + TmpRes[2] + TmpRes[3] + TmpRes[4] + TmpRes[5] +
-         TmpRes[6] + TmpRes[7];
-}
-
-#elif defined(USE_SSE)
-
-static float L2SqrSIMD16Ext(const float *pVect1, const float *pVect2,
-                            const size_t qty) {
-  float PORTABLE_ALIGN32 TmpRes[8];
-  size_t qty16 = qty >> 4;
-
-  const float *pEnd1 = pVect1 + (qty16 << 4);
-
-  __m128 diff, v1, v2;
-  __m128 sum = _mm_set1_ps(0);
-
-  while (pVect1 < pEnd1) {
-    //_mm_prefetch((char*)(pVect2 + 16), _MM_HINT_T0);
-    v1 = _mm_loadu_ps(pVect1);
-    pVect1 += 4;
-    v2 = _mm_loadu_ps(pVect2);
-    pVect2 += 4;
-    diff = _mm_sub_ps(v1, v2);
-    sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
-
-    v1 = _mm_loadu_ps(pVect1);
-    pVect1 += 4;
-    v2 = _mm_loadu_ps(pVect2);
-    pVect2 += 4;
-    diff = _mm_sub_ps(v1, v2);
-    sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
-
-    v1 = _mm_loadu_ps(pVect1);
-    pVect1 += 4;
-    v2 = _mm_loadu_ps(pVect2);
-    pVect2 += 4;
-    diff = _mm_sub_ps(v1, v2);
-    sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
-
-    v1 = _mm_loadu_ps(pVect1);
-    pVect1 += 4;
-    v2 = _mm_loadu_ps(pVect2);
-    pVect2 += 4;
-    diff = _mm_sub_ps(v1, v2);
-    sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
+static __attribute__((target("avx,avx2,fma"))) L2SqrSSEInnerLoop(SimdType<SSE>::vector v1, SimdType<SSE> v2, SimdType<SSE> accumulator) {
+    SimdType<SSE> diff = _mm_sub_ps(v1, v2);
+    return _mm_add_ps(accumulator, _mm_mul_ps(diff, diff));
   }
 
-  _mm_store_ps(TmpRes, sum);
-  return TmpRes[0] + TmpRes[1] + TmpRes[2] + TmpRes[3];
-}
-#endif
 
-#if defined(USE_SSE) || defined(USE_AVX) || defined(USE_AVX512)
-static float L2SqrSIMD16ExtResiduals(const float *pVect1, const float *pVect2,
+template <SIMD_ARCH s, typename data_t, typename scalefactor = std::ratio<1, 1>>
+static float L2Sqr(const data_t *__restrict pVect1,
+                    const data_t *__restrict pVect2, const size_t qty) {
+
+}
+
+template <SIMD_ARCH s, typename data_t, typename scalefactor = std::ratio<1, 1>>
+static float L2SqrSimdAtLeast(const float *pVect1, const float *pVect2,
                                      const size_t qty) {
-  size_t qty16 = qty >> 4 << 4;
-  float res = L2SqrSIMD16Ext(pVect1, pVect2, qty16);
+  size_t qty_simd = qty >> SimdType<s>::inner_loop_lenght << SimdType<s>::inner_loop_lenght;
+  float res = L2SqrSimd<s, data_t, scalefactor>(pVect1, pVect2, qty16);
 
   size_t qty_left = qty - qty16;
   float res_tail =
-      L2Sqr<float, float>(pVect1 + qty16, pVect2 + qty16, qty_left);
+      L2Sqr<float, data_t>(pVect1 + qty16, pVect2 + qty16, qty_left);
   return (res + res_tail);
 }
-#endif
 
-#ifdef USE_SSE
-static float L2SqrSIMD4Ext(const float *pVect1, const float *pVect2,
-                           const size_t qty) {
-  float PORTABLE_ALIGN32 TmpRes[8];
-  size_t qty4 = qty >> 2;
-
-  const float *pEnd1 = pVect1 + (qty4 << 2);
-
-  __m128 diff, v1, v2;
-  __m128 sum = _mm_set1_ps(0);
-
-  while (pVect1 < pEnd1) {
-    v1 = _mm_loadu_ps(pVect1);
-    pVect1 += 4;
-    v2 = _mm_loadu_ps(pVect2);
-    pVect2 += 4;
-    diff = _mm_sub_ps(v1, v2);
-    sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
-  }
-  _mm_store_ps(TmpRes, sum);
-  return TmpRes[0] + TmpRes[1] + TmpRes[2] + TmpRes[3];
-}
-
-static float L2SqrSIMD4ExtResiduals(const float *pVect1, const float *pVect2,
-                                    const size_t qty) {
-  size_t qty4 = qty >> 2 << 2;
-
-  float res = L2SqrSIMD4Ext(pVect1, pVect2, qty4);
-  size_t qty_left = qty - qty4;
-
-  float res_tail = L2Sqr<float, float>(pVect1 + qty4, pVect2 + qty4, qty_left);
-
-  return (res + res_tail);
-}
 #endif
 
 template <typename dist_t, typename data_t = dist_t,
@@ -272,19 +186,15 @@ public:
   ~EuclideanSpace() {}
 };
 
-template <>
-EuclideanSpace<float, float>::EuclideanSpace(size_t dim)
+template <typename data_t = dist_t,
+          typename scalefactor = std::ratio<1, 1>>
+EuclideanSpace<float, data_t, scalefactor>::EuclideanSpace(size_t dim)
     : data_size_(dim * sizeof(float)), dim_(dim) {
   fstdistfunc_ = L2Sqr<float, float>;
-#if defined(USE_SSE) || defined(USE_AVX) || defined(USE_AVX512)
+  SIMD_ARCH simd_arch = get_x86_simd_arch()
   if (dim % 16 == 0)
-    fstdistfunc_ = L2SqrSIMD16Ext;
-  else if (dim % 4 == 0)
-    fstdistfunc_ = L2SqrSIMD4Ext;
+    fstdistfunc_ = x86_simd_dispatch(L2SqrAVX512F16Ext, L2SqrAVX16Ext, L2SqrSSE16Ext);
   else if (dim > 16)
-    fstdistfunc_ = L2SqrSIMD16ExtResiduals;
-  else if (dim > 4)
-    fstdistfunc_ = L2SqrSIMD4ExtResiduals;
-#endif
+    fstdistfunc_ = x86_simd_dispatch(L2SqrAVX512F16ExtResiduals, L2SqrAVX16ExtResiduals, L2SqrSSE16ExtResiduals);
 }
 } // namespace hnswlib
