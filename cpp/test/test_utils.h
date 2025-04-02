@@ -1,8 +1,10 @@
 #pragma once
+#include <cstdlib>
 #include <random>
 #include <vector>
 
 #include "array_utils.h"
+#include "simd_utils.h"
 
 // create test data intended for Float8 storage or E4M3 storage
 std::vector<std::vector<float>> randomQuantizedVectors(int numVectors,

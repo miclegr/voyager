@@ -28,15 +28,6 @@
 #endif
 #endif
 
-#ifdef USE_SIMD_DISPATCHER
-#ifdef _MSC_VER
-#include <intrin.h>
-#include <stdexcept>
-#else
-#include <x86intrin.h>
-#endif
-#endif
-
 #if defined(__GNUC__)
 #define PORTABLE_ALIGN32 __attribute__((aligned(32)))
 #define PORTABLE_ALIGN64 __attribute__((aligned(64)))

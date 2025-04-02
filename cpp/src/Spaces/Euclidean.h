@@ -65,60 +65,77 @@ static dist_t L2SqrAtLeast(const data_t *__restrict pVect1,
                                                remainder);
 }
 
-
-
-template <SIMD_ARCH s, typename data_t, typename scalefactor = std::ratio<1, 1>>
+template <SIMD_ARCH arch, typename data_t, typename scalefactor = std::ratio<1, 1>>
 static float L2SqrSimd(const data_t *__restrict pVect1,
                     const data_t *__restrict pVect2, const size_t qty) {
 
-  typename SimdType<s>::register_t accumulator = SimdType<s>::newAccumulator();
+  using Simd = SimdType<arch>;
+  using register_t = typename Simd::register_t;
+  float res;
 
-  for (size_t i = 0; i < qty / SimdType<s>::inner_loop_lenght; i++) {
+  if constexpr (arch == SIMD_ARCH::SSE) {
+    res = [&]() PORTABLE_TARGET_SSE {
 
-    typename SimdType<s>::register_t v1 = SimdType<s>::loadAndConvertToFloat(pVect1);
-    typename SimdType<s>::register_t v2 = SimdType<s>::loadAndConvertToFloat(pVect2);
+      register_t accumulator = Simd::newAccumulator();
+      for (size_t i = 0; i < qty / Simd::floatsPerLine; i++) {
 
-    if constexpr (s == SSE) {
-      L2SqrSSEInnerLoop(v1, v2, accumulator);
-    } else if constexpr (s == AVX2) {
-      L2SqrAVX2InnerLoop(v1, v2, accumulator);
-    } else if constexpr (s == AVX512) {
-      L2SqrAVX512FInnerLoop(v1, v2, accumulator);
-    }
+        register_t v1 = Simd::loadAndConvertToFloat(pVect1);
+        register_t v2 = Simd::loadAndConvertToFloat(pVect2);
+        register_t diff = _mm_sub_ps(v1, v2);
+        accumulator = _mm_add_ps(accumulator, _mm_mul_ps(diff, diff));
+        pVect1+=Simd::floatsPerLine;
+        pVect2+=Simd::floatsPerLine;
 
-    pVect1+=SimdType<s>::floatsPerLine;
-    pVect2+=SimdType<s>::floatsPerLine;
+      }
+      float res = Simd::collapseAccumulator(accumulator);
+      return res;
+      }();
+  } else if constexpr (arch == SIMD_ARCH::AVX2) {
+    res = [&]() PORTABLE_TARGET_AVX2 {
 
+      register_t accumulator = Simd::newAccumulator();
+      for (size_t i = 0; i < qty / Simd::floatsPerLine; i++) {
+
+        register_t v1 = Simd::loadAndConvertToFloat(pVect1);
+        register_t v2 = Simd::loadAndConvertToFloat(pVect2);
+        register_t diff = _mm256_sub_ps(v1, v2);
+        accumulator = _mm256_fmadd_ps(diff, diff, accumulator);  
+        pVect1+=Simd::floatsPerLine;
+        pVect2+=Simd::floatsPerLine;
+
+      }
+      float res = Simd::collapseAccumulator(accumulator);
+      return res;
+      }();
+  } else if constexpr (arch == SIMD_ARCH::AVX512) {
+    res = [&]() PORTABLE_TARGET_AVX512 {
+
+      register_t accumulator = Simd::newAccumulator();
+      for (size_t i = 0; i < qty / Simd::floatsPerLine; i++) {
+
+        register_t v1 = Simd::loadAndConvertToFloat(pVect1);
+        register_t v2 = Simd::loadAndConvertToFloat(pVect2);
+        register_t diff = _mm512_sub_ps(v1, v2);
+        accumulator = _mm512_fmadd_ps(diff, diff, accumulator);
+        pVect1+=Simd::floatsPerLine;
+        pVect2+=Simd::floatsPerLine;
+
+      }
+      float res = Simd::collapseAccumulator(accumulator);
+      return res;
+      }();
   }
 
-  float res = SimdType<s>::collapseAccumulator(accumulator);
   constexpr float scale = (float)scalefactor::num / (float)scalefactor::den;
   return (res * scale * scale);
 }
 
 
-static void PORTABLE_TARGET_SSE L2SqrSSEInnerLoop(SimdType<SSE>::register_t v1, SimdType<SSE>::register_t v2, SimdType<SSE>::register_t accumulator) {
-    typename SimdType<SSE>::register_t diff = _mm_sub_ps(v1, v2);
-    _mm_add_ps(accumulator, _mm_mul_ps(diff, diff));
-  }
-
-static void PORTABLE_TARGET_AVX2 L2SqrAVX2InnerLoop(SimdType<AVX2>::register_t v1, SimdType<AVX2>::register_t v2, SimdType<AVX2>::register_t accumulator) {
-    typename SimdType<AVX2>::register_t diff = _mm256_sub_ps(v1, v2);
-    _mm256_fmadd_ps(diff, diff, accumulator);  
-  }
-
-static void PORTABLE_TARGET_AVX512 L2SqrAVX512FInnerLoop(SimdType<AVX512>::register_t v1, SimdType<AVX512>::register_t v2, SimdType<AVX512>::register_t accumulator) {
-    typename SimdType<AVX512>::register_t diff = _mm512_sub_ps(v1, v2);
-    // sum = _mm512_fmadd_ps(diff, diff, sum);
-    _mm512_add_ps(accumulator, _mm512_mul_ps(diff, diff));
-  }
-
-
-template <SIMD_ARCH s, typename data_t, typename scalefactor = std::ratio<1, 1>>
-static float L2SqrAtLeastSimd(const float *pVect1, const float *pVect2,
+template <SIMD_ARCH arch, typename data_t, typename scalefactor = std::ratio<1, 1>>
+static float L2SqrAtLeastSimd(const data_t *pVect1, const data_t *pVect2,
                                      const size_t qty) {
-  size_t qty_simd = qty >> SimdType<s>::floatsPerLine << SimdType<s>::floatsPerLine;
-  float res = L2SqrSimd<s, data_t, scalefactor>(pVect1, pVect2, qty_simd);
+  size_t qty_simd = qty >> SimdType<arch>::floatsPerLine << SimdType<arch>::floatsPerLine;
+  float res = L2SqrSimd<arch, data_t, scalefactor>(pVect1, pVect2, qty_simd);
 
   size_t qty_left = qty - qty_simd;
   float res_tail =
@@ -164,6 +181,38 @@ public:
       fstdistfunc_ = L2SqrAtLeast<dist_t, data_t, 4, scalefactor>;
     else
       fstdistfunc_ = L2Sqr<dist_t, data_t, 1, scalefactor>;
+
+    if constexpr (std::is_same<dist_t, float>::value && std::is_same<data_t, float>::value) {
+
+      SIMD_ARCH simd_arch = getX86SimdArch();
+
+      if (simd_arch == SIMD_ARCH::SSE)
+        fstdistfunc_ = L2SqrSimd<SSE, float, scalefactor>;
+      else if (simd_arch == SIMD_ARCH::AVX2)
+        fstdistfunc_ = L2SqrSimd<AVX2, float, scalefactor>;
+      else if (simd_arch == SIMD_ARCH::AVX512)
+        fstdistfunc_ = L2SqrSimd<AVX512, float, scalefactor>;
+
+      }
+
+    if constexpr (std::is_same<dist_t, float>::value && std::is_same<data_t, int8_t>::value) {
+
+      SIMD_ARCH simd_arch = getX86SimdArch();
+
+      if (simd_arch == SSE)
+        fstdistfunc_ = L2SqrSimd<SSE, int8_t, scalefactor>;
+      else if (simd_arch == AVX2)
+        fstdistfunc_ = L2SqrSimd<AVX2, int8_t, scalefactor>;
+      else if (simd_arch == AVX512)
+        fstdistfunc_ = L2SqrSimd<AVX512, int8_t, scalefactor>;
+
+      }
+
+    if constexpr (std::is_same<dist_t, float>::value && std::is_same<data_t, E4M3>::value) {
+
+      fstdistfunc_ = L2SqrSimd<SSE, E4M3, scalefactor>;
+
+      }
   }
 
   size_t get_data_size() { return data_size_; }
@@ -173,42 +222,6 @@ public:
   size_t get_dist_func_param() { return dim_; }
 
   ~EuclideanSpace() {}
-
-  template <typename T = dist_t, typename U = data_t,
-              typename std::enable_if<std::is_same<T, float>::value && std::is_same<U, float>::value, int>::type = 0>
-  EuclideanSpace(size_t dim)
-      : data_size_(dim * sizeof(float)), dim_(dim) {
-    fstdistfunc_ = L2Sqr<float, float>;
-    SIMD_ARCH simd_arch = get_x86_simd_arch();
-
-    if (dim % 128 == 0)
-      fstdistfunc_ = L2SqrSimd<SSE, float, 128, scalefactor>;
-    else if (dim % 64 == 0)
-      fstdistfunc_ = L2SqrSimd<SSE, float, 64, scalefactor>;
-    else if (dim % 32 == 0)
-      fstdistfunc_ = L2SqrSimd<SSE, float, 32, scalefactor>;
-    else if (dim % 16 == 0)
-      fstdistfunc_ = L2SqrSimd<SSE, float, 16, scalefactor>;
-    else if (dim % 8 == 0)
-      fstdistfunc_ = L2SqrSimd<SSE, float, 8, scalefactor>;
-    else if (dim % 4 == 0)
-      fstdistfunc_ = L2SqrSimd<SSE, float, 4, scalefactor>;
-
-    else if (dim > 128)
-      fstdistfunc_ = L2SqrAtLeastSimd<SSE, float, 128, scalefactor>;
-    else if (dim > 64)
-      fstdistfunc_ = L2SqrAtLeastSimd<SSE, float, 64, scalefactor>;
-    else if (dim > 32)
-      fstdistfunc_ = L2SqrAtLeastSimd<SSE, float, 32, scalefactor>;
-    else if (dim > 16)
-      fstdistfunc_ = L2SqrAtLeastSimd<SSE, float, 16, scalefactor>;
-    else if (dim > 8)
-      fstdistfunc_ = L2SqrAtLeastSimd<SSE, float, 8, scalefactor>;
-    else if (dim > 4)
-      fstdistfunc_ = L2SqrAtLeastSimd<SSE, float, 4, scalefactor>;
-    else
-      fstdistfunc_ = L2Sqr<float, float, 1, scalefactor>;
-    }
 
 };
 

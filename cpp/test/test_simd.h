@@ -6,10 +6,14 @@
 #include <numeric>
 #include <sys/types.h>
 #include <vector>
+#include <functional>
 
 #include "TypedIndex.h"
 #include "simd_utils.h"
 #include "test_utils.h"
+
+template <SIMD_ARCH Arch> 
+void testSimdUtils();
 
 
 template <SIMD_ARCH Arch> 
@@ -19,8 +23,8 @@ void testSimdUtils() {
   float epsilon = 1e-5;
 
   SUBCASE("Test newAccumulator") {
-    typename Simd::register_t __attribute__((aligned(64))) accReg = Simd::newAccumulator();
-    const float *accPtr = reinterpret_cast<const float *>(&accReg);
+    std::vector<float> accReg = Simd::registerToVectorWrapper(Simd::newAccumulator);
+    const float *accPtr = accReg.data();
     for (int i = 0; i < N; ++i) {
       CHECK(accPtr[i] == 0.0f);
     }
@@ -30,8 +34,9 @@ void testSimdUtils() {
     std::vector<std::vector<float>> dataVec = randomVectors(1, N);
     const float *inputData = dataVec[0].data();
 
-    typename Simd::register_t reg = Simd::loadAndConvertToFloat(inputData);
-    const float *regPtr = reinterpret_cast<const float *>(&reg);
+    auto loadFloatAndConvertToFloat = Simd:: template loadAndConvertToFloat<float>;
+    std::vector<float> reg = Simd::registerToVectorWrapper(loadFloatAndConvertToFloat,inputData);
+    const float *regPtr = reg.data();
 
     for (int i = 0; i < N; ++i) {
       CHECK(regPtr[i] == doctest::Approx(inputData[i]).epsilon(epsilon));
@@ -39,11 +44,21 @@ void testSimdUtils() {
   }
 
   SUBCASE("Test loadAndConvertToFloat (int8_t)") {
-    std::vector<std::vector<float>> dataVec = randomQuantizedVectors(1, N);
-    const float *inputData = dataVec[0].data();
+    std::vector<std::vector<float>> floatVectors= randomQuantizedVectors(1, N);
+    std::vector<std::vector<int8_t>> dataVec(floatVectors.size());
+    std::transform(floatVectors.begin(), floatVectors.end(), dataVec.begin(),
+                   [](const std::vector<float>& floatVec) {
+                     std::vector<int8_t> int8Vec(floatVec.size());
+                     std::transform(floatVec.begin(), floatVec.end(), int8Vec.begin(),
+                                    [](float f) { return static_cast<int8_t>(f); });
+                   return int8Vec;
+                 });
 
-    typename Simd::register_t reg = Simd::loadAndConvertToFloat(inputData);
-    const float *regPtr = reinterpret_cast<const float *>(&reg);
+    const int8_t *inputData = dataVec[0].data();
+
+    auto loadInt8AndConvertToFloat = Simd:: template loadAndConvertToFloat<int8_t>;
+    std::vector<float> reg = Simd::registerToVectorWrapper(loadInt8AndConvertToFloat, inputData);
+    const float *regPtr = reg.data();
 
     for (int i = 0; i < N; ++i) {
       CHECK(regPtr[i] == doctest::Approx(static_cast<float>(inputData[i])).epsilon(epsilon));
@@ -59,11 +74,13 @@ void testSimdUtils() {
             inputData[i] = E4M3(static_cast<uint8_t>(i));
         }
 
+        auto loadE4M3AndConvertToFloat = Simd:: template loadAndConvertToFloat<E4M3>;
+
         for (int i = 200; i < 256 - N; ++i) {
 
           const E4M3 *inputDataI = inputData.data() + i;
-          typename Simd::register_t reg = Simd::loadAndConvertToFloat(inputDataI);
-          const float *regPtr = reinterpret_cast<const float *>(&reg);
+          std::vector<float> reg = Simd::registerToVectorWrapper(loadE4M3AndConvertToFloat, inputDataI);
+          const float *regPtr = reg.data();
 
           for (int j = 0; j < N; ++j) {
               float expected = static_cast<float>(inputData[i+j]);
@@ -82,14 +99,13 @@ void testSimdUtils() {
     std::vector<std::vector<float>> dataVec = randomVectors(1, N);
     const float *inputData = dataVec[0].data();
 
-    typename Simd::register_t __attribute__((aligned(64))) reg = Simd::loadAndConvertToFloat(inputData);
-
     float expectedSum = 0.0f;
     for (int i = 0; i < N; ++i) {
       expectedSum += inputData[i];
     }
 
-    float collapsedSum = Simd::collapseAccumulator(reg);
+    auto accumulator = *(reinterpret_cast<const typename Simd::register_t*>(inputData));
+    float collapsedSum = Simd::collapseAccumulator(accumulator);
 
     CHECK(collapsedSum == doctest::Approx(expectedSum).epsilon(epsilon));
 
@@ -152,10 +168,10 @@ TEST_CASE("Test SIMD Utilities") {
     testSimdUtils<SIMD_ARCH::AVX512>();
     break;
   case SIMD_ARCH::AVX2:
-    testSimdUtils<SIMD_ARCH::AVX512>();
+    testSimdUtils<SIMD_ARCH::AVX2>();
     break;
   case SIMD_ARCH::SSE:
-    testSimdUtils<SSE>();
+    testSimdUtils<SIMD_ARCH::SSE>();
     break;
   default:
     FAIL("Unknown or no SIMD architecture detected!");
@@ -168,13 +184,13 @@ TEST_CASE("Test SIMD distance calculations") {
 
   switch (arch) {
   case SIMD_ARCH::AVX512:
-    testSimdDistanceCalulations<AVX512>();
+    testSimdDistanceCalulations<SIMD_ARCH::AVX512>();
     break;
   case SIMD_ARCH::AVX2:
-    testSimdDistanceCalulations<AVX2>();
+    testSimdDistanceCalulations<SIMD_ARCH::AVX2>();
     break;
   case SIMD_ARCH::SSE:
-    testSimdDistanceCalulations<SSE>();
+    testSimdDistanceCalulations<SIMD_ARCH::SSE>();
     break;
   default:
     FAIL("Unknown or no SIMD architecture detected!");
