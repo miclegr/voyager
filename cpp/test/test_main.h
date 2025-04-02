@@ -1,7 +1,7 @@
 #include "doctest.h"
 
 #include "TypedIndex.h"
-#include "test_utils.cpp"
+#include "test_utils.h"
 #include <tuple>
 #include <type_traits>
 
