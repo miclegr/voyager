@@ -35,17 +35,16 @@
 #endif
 
 #if defined(__GNUC__)
-#define PORTABLE_TARGET_SSE __attribute__((target("sse4.1")))
+#define PORTABLE_TARGET_SSE __attribute__((target("sse4.2")))
 #define PORTABLE_TARGET_AVX2 __attribute__((target("avx,avx2,fma")))
 #define PORTABLE_TARGET_AVX512 __attribute__((target("avx512f,avx512dq")))
 #else
-#define PORPORTABLE_TARGET_SSE
+#define PORTABLE_TARGET_SSE 
 #define PORTABLE_TARGET_AVX2
-#define PORPORTABLE_TARGET_AVX512
+#define PORTABLE_TARGET_AVX512
 #endif
 
 #include "E4M3.h"
-
 
 enum SIMD_ARCH {
   NONE,
@@ -153,19 +152,19 @@ typename SimdType<AVX512>::register_t PORTABLE_TARGET_AVX512 SimdType<AVX512>::l
 
 template<>
 typename SimdType<SSE>::register_t PORTABLE_TARGET_SSE SimdType<SSE>::loadAndConvertToFloat(int8_t const* data){
-    __m128i int_vector = _mm_loadu_si128(reinterpret_cast<const __m128i*>(data));
+    __m128i int_vector = _mm_cvtsi32_si128(*reinterpret_cast<const int*>(data));
     return _mm_cvtepi32_ps(_mm_cvtepi8_epi32(int_vector));
 }
 
 template<>
 typename SimdType<AVX2>::register_t PORTABLE_TARGET_AVX2 SimdType<AVX2>::loadAndConvertToFloat(int8_t const* data){
-    __m128i int_vector = _mm_loadu_si128(reinterpret_cast<const __m128i*>(data));
+    __m128i int_vector = _mm_cvtsi64_si128(*reinterpret_cast<const int64_t*>(data));
     return _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(int_vector));
 }
 
 template<>
 typename SimdType<AVX512>::register_t PORTABLE_TARGET_AVX512 SimdType<AVX512>::loadAndConvertToFloat(int8_t const* data){
-    __m128i int_vector = _mm_loadu_si128(reinterpret_cast<const __m128i*>(data));
+    __m128i int_vector = _mm_lddqu_si128(reinterpret_cast<const __m128i*>(data));
     return _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(int_vector));
 }
 
@@ -178,7 +177,7 @@ typename SimdType<SSE>::register_t PORTABLE_TARGET_SSE SimdType<SSE>::loadAndCon
     // Check if e4m3_vector is all zeros or all ones
     __m128i is_subnormal = _mm_cmpeq_epi32(_mm_and_si128(e4m3_vector_32, _mm_set1_epi32(0b00011110)),_mm_setzero_si128());
     __m128i is_nan = _mm_cmpeq_epi32(_mm_and_si128(e4m3_vector_32, _mm_set1_epi32(0b11111110)), _mm_set1_epi32(0b11111110));
-    __m128 is_subnormal_or_nan = reinterpret_cast<const __m128>(_mm_or_si128(is_subnormal, is_nan));
+    __m128 is_subnormal_or_nan = _mm_castsi128_ps(_mm_or_si128(is_subnormal, is_nan));
 
     // subnormal or nan case
 
@@ -189,7 +188,7 @@ typename SimdType<SSE>::register_t PORTABLE_TARGET_SSE SimdType<SSE>::loadAndCon
     __m128i subnormal_exponent_mapped = _mm_cvtepu8_epi32(_mm_shuffle_epi8(subnormal_exponent_lookup, subnormal_lookup_idx));
     __m128i subnormal_mantissa_mapped = _mm_cvtepu8_epi32(_mm_shuffle_epi8(subnormal_mantissa_lookup, subnormal_lookup_idx));
 
-    __m128 unsigned_subnormal = reinterpret_cast<const __m128>(_mm_or_si128(
+    __m128 unsigned_subnormal = _mm_castsi128_ps(_mm_or_si128(
         _mm_slli_epi32(subnormal_exponent_mapped, 23),
         _mm_slli_epi32(subnormal_mantissa_mapped, 20)
     ));
@@ -199,29 +198,29 @@ typename SimdType<SSE>::register_t PORTABLE_TARGET_SSE SimdType<SSE>::loadAndCon
     __m128i normal_mantissa = _mm_and_si128(e4m3_vector_32,_mm_set1_epi32(0b11100000));
     normal_exponent = _mm_add_epi32(normal_exponent, _mm_set1_epi32(240)); // 240 = (120 << 1)
 
-    __m128 unsigned_normal = reinterpret_cast<__m128>(_mm_or_si128(
+    __m128 unsigned_normal = _mm_castsi128_ps(_mm_or_si128(
         _mm_slli_epi32(normal_exponent, 22),
         _mm_slli_epi32(normal_mantissa, 15)
     ));
 
     // combine
-    __m128i blended = reinterpret_cast<__m128i>(_mm_blendv_ps(unsigned_normal, unsigned_subnormal, is_subnormal_or_nan));
+    __m128i blended = _mm_castps_si128(_mm_blendv_ps(unsigned_normal, unsigned_subnormal, is_subnormal_or_nan));
 
     const __m128i sign = _mm_slli_epi32(_mm_and_si128(e4m3_vector_32,_mm_set1_epi32(1)), 31);
-    return reinterpret_cast<__m128>(_mm_or_si128(blended, sign));
+    return _mm_castsi128_ps(_mm_or_si128(blended, sign));
     
 }
 
 template<>
 typename SimdType<AVX2>::register_t PORTABLE_TARGET_AVX2 SimdType<AVX2>::loadAndConvertToFloat(E4M3 const* data){
 
-    __m128i e4m3_vector = _mm_cvtsi64_si128(*reinterpret_cast<const long*>(data));
+    __m128i e4m3_vector = _mm_cvtsi64_si128(*reinterpret_cast<const int64_t*>(data));
     __m256i e4m3_vector_32 = _mm256_cvtepu8_epi32(e4m3_vector);
 
     // Check if e4m3_vector is all zeros or all ones
     __m256i is_subnormal = _mm256_cmpeq_epi32(_mm256_and_si256(e4m3_vector_32, _mm256_set1_epi32(0b00011110)),_mm256_setzero_si256());
     __m256i is_nan = _mm256_cmpeq_epi32(_mm256_and_si256(e4m3_vector_32, _mm256_set1_epi32(0b11111110)), _mm256_set1_epi32(0b11111110));
-    __m256 is_subnormal_or_nan = reinterpret_cast<__m256>(_mm256_or_si256(is_subnormal, is_nan));
+    __m256 is_subnormal_or_nan = _mm256_castsi256_ps(_mm256_or_si256(is_subnormal, is_nan));
 
     // subnormal or nan case
 
@@ -232,7 +231,7 @@ typename SimdType<AVX2>::register_t PORTABLE_TARGET_AVX2 SimdType<AVX2>::loadAnd
     __m256i subnormal_exponent_mapped = _mm256_cvtepu8_epi32(_mm256_castsi256_si128(_mm256_shuffle_epi8(subnormal_exponent_lookup, subnormal_lookup_idx)));
     __m256i subnormal_mantissa_mapped = _mm256_cvtepu8_epi32(_mm256_castsi256_si128(_mm256_shuffle_epi8(subnormal_mantissa_lookup, subnormal_lookup_idx)));
 
-    __m256 unsigned_subnormal = reinterpret_cast<__m256>(_mm256_or_si256(
+    __m256 unsigned_subnormal = _mm256_castsi256_ps(_mm256_or_si256(
         _mm256_slli_epi32(subnormal_exponent_mapped, 23),
         _mm256_slli_epi32(subnormal_mantissa_mapped, 20)
     ));
@@ -242,16 +241,16 @@ typename SimdType<AVX2>::register_t PORTABLE_TARGET_AVX2 SimdType<AVX2>::loadAnd
     __m256i normal_mantissa = _mm256_and_si256(e4m3_vector_32,_mm256_set1_epi32(0b11100000));
     normal_exponent = _mm256_add_epi32(normal_exponent, _mm256_set1_epi32(240)); // 240 = (120 << 1)
 
-    __m256 unsigned_normal = reinterpret_cast<__m256>(_mm256_or_si256(
+    __m256 unsigned_normal = _mm256_castsi256_ps(_mm256_or_si256(
         _mm256_slli_epi32(normal_exponent, 22),
         _mm256_slli_epi32(normal_mantissa, 15)
     ));
 
     // combine
-    __m256i blended = reinterpret_cast<__m256i>(_mm256_blendv_ps(unsigned_normal, unsigned_subnormal, is_subnormal_or_nan));
+    __m256i blended = _mm256_castps_si256(_mm256_blendv_ps(unsigned_normal, unsigned_subnormal, is_subnormal_or_nan));
 
     const __m256i sign = _mm256_slli_epi32(_mm256_and_si256(e4m3_vector_32,_mm256_set1_epi32(1)), 31);
-    return reinterpret_cast<__m256>(_mm256_or_si256(blended, sign));
+    return _mm256_castsi256_ps(_mm256_or_si256(blended, sign));
 
 }
 
@@ -275,7 +274,7 @@ typename SimdType<AVX512>::register_t PORTABLE_TARGET_AVX512 SimdType<AVX512>::l
     __m512i subnormal_exponent_mapped = _mm512_cvtepu8_epi32(_mm256_castsi256_si128(_mm256_shuffle_epi8(subnormal_exponent_lookup, subnormal_lookup_idx)));
     __m512i subnormal_mantissa_mapped = _mm512_cvtepu8_epi32(_mm256_castsi256_si128(_mm256_shuffle_epi8(subnormal_mantissa_lookup, subnormal_lookup_idx)));
 
-    __m512 unsigned_subnormal = reinterpret_cast<__m512>(_mm512_or_si512(
+    __m512 unsigned_subnormal = _mm512_castsi512_ps(_mm512_or_si512(
         _mm512_slli_epi32(subnormal_exponent_mapped, 23),
         _mm512_slli_epi32(subnormal_mantissa_mapped, 20)
     ));
@@ -285,16 +284,16 @@ typename SimdType<AVX512>::register_t PORTABLE_TARGET_AVX512 SimdType<AVX512>::l
     __m512i normal_mantissa = _mm512_and_si512(e4m3_vector_32,_mm512_set1_epi32(0b11100000));
     normal_exponent = _mm512_add_epi32(normal_exponent, _mm512_set1_epi32(240)); // 240 = (120 << 1)
 
-    __m512 unsigned_normal = reinterpret_cast<__m512>(_mm512_or_si512(
+    __m512 unsigned_normal = _mm512_castsi512_ps(_mm512_or_si512(
         _mm512_slli_epi32(normal_exponent, 22),
         _mm512_slli_epi32(normal_mantissa, 15)
     ));
 
     // combine
-    __m512i blended = reinterpret_cast<__m512i>(_mm512_mask_blend_ps(is_subnormal_or_nan, unsigned_normal, unsigned_subnormal));
+    __m512i blended = _mm512_castps_si512(_mm512_mask_blend_ps(is_subnormal_or_nan, unsigned_normal, unsigned_subnormal));
 
     const __m512i sign = _mm512_slli_epi32(_mm512_and_si512(e4m3_vector_32,_mm512_set1_epi32(1)), 31);
-    return reinterpret_cast<__m512>(_mm512_or_si512(blended, sign));
+    return _mm512_castsi512_ps(_mm512_or_si512(blended, sign));
 }
 
 
