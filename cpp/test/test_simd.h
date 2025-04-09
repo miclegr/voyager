@@ -6,15 +6,12 @@
 #include <numeric>
 #include <sys/types.h>
 #include <vector>
-#include <functional>
+#include <tuple>
+#include <variant>
 
 #include "TypedIndex.h"
 #include "simd_utils.h"
 #include "test_utils.h"
-
-template <SIMD_ARCH Arch> 
-void testSimdUtils();
-
 
 template <SIMD_ARCH Arch> 
 void testSimdUtils() {
@@ -44,16 +41,7 @@ void testSimdUtils() {
   }
 
   SUBCASE("Test loadAndConvertToFloat (int8_t)") {
-    std::vector<std::vector<float>> floatVectors= randomQuantizedVectors(1, N);
-    std::vector<std::vector<int8_t>> dataVec(floatVectors.size());
-    std::transform(floatVectors.begin(), floatVectors.end(), dataVec.begin(),
-                   [](const std::vector<float>& floatVec) {
-                     std::vector<int8_t> int8Vec(floatVec.size());
-                     std::transform(floatVec.begin(), floatVec.end(), int8Vec.begin(),
-                                    [](float f) { return static_cast<int8_t>(f); });
-                   return int8Vec;
-                 });
-
+    std::vector<std::vector<int8_t>> dataVec= randomQuantizedVectors<int8_t>(1, N);
     const int8_t *inputData = dataVec[0].data();
 
     auto loadInt8AndConvertToFloat = Simd:: template loadAndConvertToFloat<int8_t>;
@@ -116,41 +104,107 @@ template <SIMD_ARCH arch>
 void testSimdDistanceCalulations() {
 
   using Simd = SimdType<arch>;
+  using FloatVectorVector = std::vector<std::vector<float>>;
+  using Int8VectorVector = std::vector<std::vector<int8_t>>;
+  using E4M3VectorVector = std::vector<std::vector<E4M3>>;
+  using FloatDistanceFn = std::function<float(const float*, const float*, size_t)>;
+  using Int8DistanceFn = std::function<float(const int8_t*, const int8_t*, size_t)>;
+  using E4M3DistanceFn= std::function<float(const E4M3*, const E4M3*, size_t)>;
+
+
   constexpr int N = Simd::floatsPerLine;
   float epsilon = 1e-5;
 
   std::vector<SpaceType> spaceTypesSet = {
-      SpaceType::Euclidean};
+      SpaceType::Euclidean, SpaceType::InnerProduct};
   std::vector<StorageDataType> storageTypesSet = {
-      StorageDataType::Float8, StorageDataType::Float32, StorageDataType::E4M3};
+      StorageDataType::Float8, StorageDataType::Float32, StorageDataType::E4M3
+  };
   std::vector<int> numDimensionsSet = {256, 276};
+
+
+  std::variant<
+    std::tuple<FloatVectorVector, FloatVectorVector, FloatDistanceFn, FloatDistanceFn, FloatDistanceFn>,
+    std::tuple<Int8VectorVector, Int8VectorVector, Int8DistanceFn, Int8DistanceFn, Int8DistanceFn>,
+    std::tuple<E4M3VectorVector, E4M3VectorVector, E4M3DistanceFn, E4M3DistanceFn, E4M3DistanceFn>
+    > testData;
 
   for (auto spaceType : spaceTypesSet) {
     for (auto storageType : storageTypesSet) {
       for (auto numDimensions: numDimensionsSet) {
-        std::vector<std::vector<float>> v1, v2;
 
-        if (storageType == StorageDataType::Float8 ||
-            storageType == StorageDataType::E4M3) {
-          v1 = randomQuantizedVectors(1, numDimensions);
-          v2 = randomQuantizedVectors(1, numDimensions);
+        if (storageType == StorageDataType::Float8) {
+          Int8VectorVector v1 = randomQuantizedVectors<int8_t>(1, numDimensions);
+          Int8VectorVector v2 = randomQuantizedVectors<int8_t>(1, numDimensions);
+          Int8DistanceFn NonSimdDistanceFn, SimdDistanceFn, SimdDistanceAtLeastFn;
+          if (spaceType == SpaceType::Euclidean) {
+            NonSimdDistanceFn = hnswlib::L2Sqr<float, int8_t, 1, std::ratio<1,1>>;
+            SimdDistanceFn = hnswlib::L2SqrSimd<arch, int8_t, std::ratio<1,1>>;
+            SimdDistanceAtLeastFn = hnswlib::L2SqrAtLeastSimd<arch, int8_t, std::ratio<1,1>>;
+          } else {
+            NonSimdDistanceFn = hnswlib::InnerProduct<float, int8_t, 1, std::ratio<1,1>>;
+            SimdDistanceFn = hnswlib::InnerProductSimd<arch, int8_t, std::ratio<1,1>>;
+            SimdDistanceAtLeastFn = hnswlib::InnerProductAtLeastSimd<arch, int8_t, std::ratio<1,1>>;
+          }
+          testData = std::make_tuple(v1, v2, NonSimdDistanceFn, SimdDistanceFn, SimdDistanceAtLeastFn);
+        } else if (storageType == StorageDataType::E4M3) {
+          E4M3VectorVector v1 = randomQuantizedVectors<E4M3>(1, numDimensions);
+          E4M3VectorVector v2 = randomQuantizedVectors<E4M3>(1, numDimensions);
+          E4M3DistanceFn NonSimdDistanceFn, SimdDistanceFn, SimdDistanceAtLeastFn;
+          if (spaceType == SpaceType::Euclidean) {
+            NonSimdDistanceFn = hnswlib::L2Sqr<float, E4M3, 1, std::ratio<1,1>>;
+            SimdDistanceFn = hnswlib::L2SqrSimd<arch, E4M3, std::ratio<1,1>>;
+            SimdDistanceAtLeastFn = hnswlib::L2SqrAtLeastSimd<arch, E4M3, std::ratio<1,1>>;
+          } else {
+            NonSimdDistanceFn = hnswlib::InnerProduct<float, E4M3, 1, std::ratio<1,1>>;
+            SimdDistanceFn = hnswlib::InnerProductSimd<arch, E4M3, std::ratio<1,1>>;
+            SimdDistanceAtLeastFn = hnswlib::InnerProductAtLeastSimd<arch, E4M3, std::ratio<1,1>>;
+          }
+          testData = std::make_tuple(v1, v2, NonSimdDistanceFn, SimdDistanceFn, SimdDistanceAtLeastFn);
         } else if (storageType == StorageDataType::Float32) {
-          v1 = randomVectors(1, numDimensions);
-          v2 = randomVectors(1, numDimensions);
+          FloatVectorVector v1 = randomVectors(1, numDimensions);
+          FloatVectorVector v2 = randomVectors(1, numDimensions);
+          FloatDistanceFn NonSimdDistanceFn, SimdDistanceFn, SimdDistanceAtLeastFn;
+          if (spaceType == SpaceType::Euclidean) {
+            NonSimdDistanceFn = hnswlib::L2Sqr<float, float, 1, std::ratio<1,1>>;
+            SimdDistanceFn = hnswlib::L2SqrSimd<arch, float, std::ratio<1,1>>;
+            SimdDistanceAtLeastFn = hnswlib::L2SqrAtLeastSimd<arch, float, std::ratio<1,1>>;
+          } else {
+            NonSimdDistanceFn = hnswlib::InnerProduct<float, float, 1, std::ratio<1,1>>;
+            SimdDistanceFn = hnswlib::InnerProductSimd<arch, float, std::ratio<1,1>>;
+            SimdDistanceAtLeastFn = hnswlib::InnerProductAtLeastSimd<arch, float, std::ratio<1,1>>;
+          }
+          testData = std::make_tuple(v1, v2, NonSimdDistanceFn, SimdDistanceFn, SimdDistanceAtLeastFn);
         }
-
-        SUBCASE("Test L2Sqr") {
+        
+        SUBCASE("Test Distance") {
           CAPTURE(spaceType);
           CAPTURE(storageType);
+          CAPTURE(numDimensions);
 
-          float distance = hnswlib::L2Sqr<float>(v1[0].data(), v2[0].data(), N);
-          float distanceSimd;
-          if (numDimensions % N == 0) {
-          distanceSimd = hnswlib::L2SqrSimd<arch>(v1[0].data(), v2[0].data(), N);
-          } else {
-          distanceSimd = hnswlib::L2SqrAtLeastSimd<arch>(v1[0].data(), v2[0].data(), N);
-          }
+          float distance = std::visit(
+            [&](auto&& testData) {
+              auto&& v1 = std::get<0>(testData);
+              auto&& v2 = std::get<1>(testData);
+              auto&& fn = std::get<2>(testData);
+              return fn(v1[0].data(), v2[0].data(), numDimensions);
+            },
+            testData);
+
+          float distanceSimd = std::visit(
+            [&](auto&& testData) {
+              auto&& v1 = std::get<0>(testData);
+              auto&& v2 = std::get<1>(testData);
+              auto&& fn = std::get<3>(testData);
+              auto&& fnAtLeast = std::get<4>(testData);
+              if (numDimensions % N == 0)
+                return fn(v1[0].data(), v2[0].data(), numDimensions);
+              else
+                return fnAtLeast(v1[0].data(), v2[0].data(), numDimensions);
+            },
+            testData);
           CHECK(distance == doctest::Approx(distanceSimd).epsilon(epsilon));
+
         }
       }
     }

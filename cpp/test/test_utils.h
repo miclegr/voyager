@@ -7,10 +7,11 @@
 #include "simd_utils.h"
 
 // create test data intended for Float8 storage or E4M3 storage
-std::vector<std::vector<float>> randomQuantizedVectors(int numVectors,
+template<typename data_t = float>
+std::vector<std::vector<data_t>> randomQuantizedVectors(int numVectors,
                                                        int dimensions) {
-  std::vector<std::vector<float>> vectors(numVectors,
-                                          std::vector<float>(dimensions));
+  std::vector<std::vector<data_t>> vectors(numVectors,
+                                          std::vector<data_t>(dimensions));
 
   std::random_device rd;
   std::mt19937 gen(rd());

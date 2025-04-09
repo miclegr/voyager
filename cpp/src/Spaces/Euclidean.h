@@ -182,37 +182,25 @@ public:
     else
       fstdistfunc_ = L2Sqr<dist_t, data_t, 1, scalefactor>;
 
-    if constexpr (std::is_same<dist_t, float>::value && std::is_same<data_t, float>::value) {
+    if constexpr (std::is_same<dist_t, float>::value) {
 
       SIMD_ARCH simd_arch = getX86SimdArch();
 
-      if (simd_arch == SIMD_ARCH::SSE)
-        fstdistfunc_ = L2SqrSimd<SSE, float, scalefactor>;
-      else if (simd_arch == SIMD_ARCH::AVX2)
-        fstdistfunc_ = L2SqrSimd<AVX2, float, scalefactor>;
-      else if (simd_arch == SIMD_ARCH::AVX512)
-        fstdistfunc_ = L2SqrSimd<AVX512, float, scalefactor>;
+      if (simd_arch == SIMD_ARCH::SSE and dim % SimdType<SIMD_ARCH::SSE>::floatsPerLine == 0)
+        fstdistfunc_ = L2SqrSimd<SSE, data_t, scalefactor>;
+      else if (simd_arch == SIMD_ARCH::SSE and dim > SimdType<SIMD_ARCH::SSE>::floatsPerLine)
+        fstdistfunc_ = L2SqrAtLeastSimd<SSE, data_t, scalefactor>;
+      else if (simd_arch == SIMD_ARCH::AVX2 and dim % SimdType<SIMD_ARCH::AVX2>::floatsPerLine == 0)
+        fstdistfunc_ = L2SqrSimd<AVX2, data_t, scalefactor>;
+      else if (simd_arch == SIMD_ARCH::AVX2 and dim > SimdType<SIMD_ARCH::AVX2>::floatsPerLine)
+        fstdistfunc_ = L2SqrAtLeastSimd<AVX2, data_t, scalefactor>;
+      else if (simd_arch == SIMD_ARCH::AVX512 and dim % SimdType<SIMD_ARCH::AVX512>::floatsPerLine == 0)
+        fstdistfunc_ = L2SqrSimd<AVX512, data_t, scalefactor>;
+      else if (simd_arch == SIMD_ARCH::AVX512 and dim > SimdType<SIMD_ARCH::AVX512>::floatsPerLine)
+        fstdistfunc_ = L2SqrAtLeastSimd<AVX512, data_t, scalefactor>;
 
       }
 
-    if constexpr (std::is_same<dist_t, float>::value && std::is_same<data_t, int8_t>::value) {
-
-      SIMD_ARCH simd_arch = getX86SimdArch();
-
-      if (simd_arch == SSE)
-        fstdistfunc_ = L2SqrSimd<SSE, int8_t, scalefactor>;
-      else if (simd_arch == AVX2)
-        fstdistfunc_ = L2SqrSimd<AVX2, int8_t, scalefactor>;
-      else if (simd_arch == AVX512)
-        fstdistfunc_ = L2SqrSimd<AVX512, int8_t, scalefactor>;
-
-      }
-
-    if constexpr (std::is_same<dist_t, float>::value && std::is_same<data_t, E4M3>::value) {
-
-      fstdistfunc_ = L2SqrSimd<SSE, E4M3, scalefactor>;
-
-      }
   }
 
   size_t get_data_size() { return data_size_; }
