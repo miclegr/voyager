@@ -65,7 +65,7 @@ static dist_t L2SqrAtLeast(const data_t *__restrict pVect1,
                                                remainder);
 }
 
-template <SIMD_ARCH arch, typename data_t, typename scalefactor = std::ratio<1, 1>>
+template <SIMD_ARCH arch, typename data_t, int K, typename scalefactor = std::ratio<1, 1>>
 static float L2SqrSimd(const data_t *__restrict pVect1,
                     const data_t *__restrict pVect2, const size_t qty) {
 
@@ -73,20 +73,23 @@ static float L2SqrSimd(const data_t *__restrict pVect1,
   using register_t = typename Simd::register_t;
   float res;
 
+  static_assert(K % Simd::floatsPerLine == 0, "" );
+
   if constexpr (arch == SIMD_ARCH::SSE) {
     res = [&]() PORTABLE_TARGET_SSE {
 
       register_t accumulator = Simd::newAccumulator();
-      for (size_t i = 0; i < qty / Simd::floatsPerLine; i++) {
+      for (size_t i = 0; i < qty / K; i++) {
+        for (size_t j = 0; j < K / Simd::floatsPerLine; j++) {
+          const size_t index = (i * K) + (j * Simd::floatsPerLine);
 
-        register_t v1 = Simd::loadAndConvertToFloat(pVect1);
-        register_t v2 = Simd::loadAndConvertToFloat(pVect2);
-        register_t diff = _mm_sub_ps(v1, v2);
-        accumulator = _mm_add_ps(accumulator, _mm_mul_ps(diff, diff));
-        pVect1+=Simd::floatsPerLine;
-        pVect2+=Simd::floatsPerLine;
-
+          register_t v1 = Simd::loadAndConvertToFloat(pVect1 + index);
+          register_t v2 = Simd::loadAndConvertToFloat(pVect2 + index);
+          register_t diff = _mm_sub_ps(v1, v2);
+          accumulator = _mm_add_ps(accumulator, _mm_mul_ps(diff, diff));
+        }
       }
+
       float res = Simd::collapseAccumulator(accumulator);
       return res;
       }();
@@ -94,15 +97,15 @@ static float L2SqrSimd(const data_t *__restrict pVect1,
     res = [&]() PORTABLE_TARGET_AVX2 {
 
       register_t accumulator = Simd::newAccumulator();
-      for (size_t i = 0; i < qty / Simd::floatsPerLine; i++) {
+      for (size_t i = 0; i < qty / K; i++) {
+        for (size_t j = 0; j < K / Simd::floatsPerLine; j++) {
+          const size_t index = (i * K) + (j * Simd::floatsPerLine);
 
-        register_t v1 = Simd::loadAndConvertToFloat(pVect1);
-        register_t v2 = Simd::loadAndConvertToFloat(pVect2);
-        register_t diff = _mm256_sub_ps(v1, v2);
-        accumulator = _mm256_fmadd_ps(diff, diff, accumulator);  
-        pVect1+=Simd::floatsPerLine;
-        pVect2+=Simd::floatsPerLine;
-
+          register_t v1 = Simd::loadAndConvertToFloat(pVect1 + index);
+          register_t v2 = Simd::loadAndConvertToFloat(pVect2 + index);
+          register_t diff = _mm256_sub_ps(v1, v2);
+          accumulator = _mm256_fmadd_ps(diff, diff, accumulator);  
+        }
       }
       float res = Simd::collapseAccumulator(accumulator);
       return res;
@@ -111,15 +114,15 @@ static float L2SqrSimd(const data_t *__restrict pVect1,
     res = [&]() PORTABLE_TARGET_AVX512 {
 
       register_t accumulator = Simd::newAccumulator();
-      for (size_t i = 0; i < qty / Simd::floatsPerLine; i++) {
+      for (size_t i = 0; i < qty / K; i++) {
+        for (size_t j = 0; j < K / Simd::floatsPerLine; j++) {
+          const size_t index = (i * K) + (j * Simd::floatsPerLine);
 
-        register_t v1 = Simd::loadAndConvertToFloat(pVect1);
-        register_t v2 = Simd::loadAndConvertToFloat(pVect2);
-        register_t diff = _mm512_sub_ps(v1, v2);
-        accumulator = _mm512_fmadd_ps(diff, diff, accumulator);
-        pVect1+=Simd::floatsPerLine;
-        pVect2+=Simd::floatsPerLine;
-
+          register_t v1 = Simd::loadAndConvertToFloat(pVect1 + index);
+          register_t v2 = Simd::loadAndConvertToFloat(pVect2 + index);
+          register_t diff = _mm512_sub_ps(v1, v2);
+          accumulator = _mm512_fmadd_ps(diff, diff, accumulator);
+        }
       }
       float res = Simd::collapseAccumulator(accumulator);
       return res;
@@ -131,11 +134,11 @@ static float L2SqrSimd(const data_t *__restrict pVect1,
 }
 
 
-template <SIMD_ARCH arch, typename data_t, typename scalefactor = std::ratio<1, 1>>
+template <SIMD_ARCH arch, typename data_t, int K, typename scalefactor = std::ratio<1, 1>>
 static float L2SqrAtLeastSimd(const data_t *pVect1, const data_t *pVect2,
                                      const size_t qty) {
-  size_t qty_simd = qty >> SimdType<arch>::floatsPerLine << SimdType<arch>::floatsPerLine;
-  float res = L2SqrSimd<arch, data_t, scalefactor>(pVect1, pVect2, qty_simd);
+  size_t qty_simd = qty >> K << K;
+  float res = L2SqrSimd<arch, data_t, K, scalefactor>(pVect1, pVect2, qty_simd);
 
   size_t qty_left = qty - qty_simd;
   float res_tail =
@@ -186,18 +189,74 @@ public:
 
       SIMD_ARCH simd_arch = getX86SimdArch();
 
-      if (simd_arch == SIMD_ARCH::SSE and dim % SimdType<SIMD_ARCH::SSE>::floatsPerLine == 0)
-        fstdistfunc_ = L2SqrSimd<SSE, data_t, scalefactor>;
-      else if (simd_arch == SIMD_ARCH::SSE and dim > SimdType<SIMD_ARCH::SSE>::floatsPerLine)
-        fstdistfunc_ = L2SqrAtLeastSimd<SSE, data_t, scalefactor>;
-      else if (simd_arch == SIMD_ARCH::AVX2 and dim % SimdType<SIMD_ARCH::AVX2>::floatsPerLine == 0)
-        fstdistfunc_ = L2SqrSimd<AVX2, data_t, scalefactor>;
-      else if (simd_arch == SIMD_ARCH::AVX2 and dim > SimdType<SIMD_ARCH::AVX2>::floatsPerLine)
-        fstdistfunc_ = L2SqrAtLeastSimd<AVX2, data_t, scalefactor>;
-      else if (simd_arch == SIMD_ARCH::AVX512 and dim % SimdType<SIMD_ARCH::AVX512>::floatsPerLine == 0)
-        fstdistfunc_ = L2SqrSimd<AVX512, data_t, scalefactor>;
-      else if (simd_arch == SIMD_ARCH::AVX512 and dim > SimdType<SIMD_ARCH::AVX512>::floatsPerLine)
-        fstdistfunc_ = L2SqrAtLeastSimd<AVX512, data_t, scalefactor>;
+      if (simd_arch == SIMD_ARCH::SSE) {
+        if (dim % 128 == 0)
+          fstdistfunc_ = L2SqrSimd<SIMD_ARCH::SSE, data_t, 128, scalefactor>;
+        else if (dim % 64 == 0)
+          fstdistfunc_ = L2SqrSimd<SIMD_ARCH::SSE, data_t, 64, scalefactor>;
+        else if (dim % 32 == 0)
+          fstdistfunc_ = L2SqrSimd<SIMD_ARCH::SSE, data_t, 32, scalefactor>;
+        else if (dim % 16 == 0)
+          fstdistfunc_ = L2SqrSimd<SIMD_ARCH::SSE, data_t, 16, scalefactor>;
+        else if (dim % 8 == 0)
+          fstdistfunc_ = L2SqrSimd<SIMD_ARCH::SSE, data_t, 8, scalefactor>;
+        else if (dim % 4 == 0)
+          fstdistfunc_ = L2SqrSimd<SIMD_ARCH::SSE, data_t, 4, scalefactor>;
+
+        else if (dim > 128)
+          fstdistfunc_ = L2SqrAtLeastSimd<SIMD_ARCH::SSE, data_t, 128, scalefactor>;
+        else if (dim > 64)
+          fstdistfunc_ = L2SqrAtLeastSimd<SIMD_ARCH::SSE, data_t, 64, scalefactor>;
+        else if (dim > 32)
+          fstdistfunc_ = L2SqrAtLeastSimd<SIMD_ARCH::SSE, data_t, 32, scalefactor>;
+        else if (dim > 16)
+          fstdistfunc_ = L2SqrAtLeastSimd<SIMD_ARCH::SSE, data_t, 16, scalefactor>;
+        else if (dim > 8)
+          fstdistfunc_ = L2SqrAtLeastSimd<SIMD_ARCH::SSE, data_t, 8, scalefactor>;
+        else if (dim > 4)
+          fstdistfunc_ = L2SqrAtLeastSimd<SIMD_ARCH::SSE, data_t, 4, scalefactor>;
+      } else if (simd_arch == SIMD_ARCH::AVX2) {
+        if (dim % 128 == 0)
+          fstdistfunc_ = L2SqrSimd<SIMD_ARCH::AVX2, data_t, 128, scalefactor>;
+        else if (dim % 64 == 0)
+          fstdistfunc_ = L2SqrSimd<SIMD_ARCH::AVX2, data_t, 64, scalefactor>;
+        else if (dim % 32 == 0)
+          fstdistfunc_ = L2SqrSimd<SIMD_ARCH::AVX2, data_t, 32, scalefactor>;
+        else if (dim % 16 == 0)
+          fstdistfunc_ = L2SqrSimd<SIMD_ARCH::AVX2, data_t, 16, scalefactor>;
+        else if (dim % 8 == 0)
+          fstdistfunc_ = L2SqrSimd<SIMD_ARCH::AVX2, data_t, 8, scalefactor>;
+
+        else if (dim > 128)
+          fstdistfunc_ = L2SqrAtLeastSimd<SIMD_ARCH::AVX2, data_t, 128, scalefactor>;
+        else if (dim > 64)
+          fstdistfunc_ = L2SqrAtLeastSimd<SIMD_ARCH::AVX2, data_t, 64, scalefactor>;
+        else if (dim > 32)
+          fstdistfunc_ = L2SqrAtLeastSimd<SIMD_ARCH::AVX2, data_t, 32, scalefactor>;
+        else if (dim > 16)
+          fstdistfunc_ = L2SqrAtLeastSimd<SIMD_ARCH::AVX2, data_t, 16, scalefactor>;
+        else if (dim > 8)
+          fstdistfunc_ = L2SqrAtLeastSimd<SIMD_ARCH::AVX2, data_t, 8, scalefactor>;
+      } else if (simd_arch == SIMD_ARCH::AVX512) {
+        if (dim % 128 == 0)
+          fstdistfunc_ = L2SqrSimd<SIMD_ARCH::AVX512, data_t, 128, scalefactor>;
+        else if (dim % 64 == 0)
+          fstdistfunc_ = L2SqrSimd<SIMD_ARCH::AVX512, data_t, 64, scalefactor>;
+        else if (dim % 32 == 0)
+          fstdistfunc_ = L2SqrSimd<SIMD_ARCH::AVX512, data_t, 32, scalefactor>;
+        else if (dim % 16 == 0)
+          fstdistfunc_ = L2SqrSimd<SIMD_ARCH::AVX512, data_t, 16, scalefactor>;
+
+        else if (dim > 128)
+          fstdistfunc_ = L2SqrAtLeastSimd<SIMD_ARCH::AVX512, data_t, 128, scalefactor>;
+        else if (dim > 64)
+          fstdistfunc_ = L2SqrAtLeastSimd<SIMD_ARCH::AVX512, data_t, 64, scalefactor>;
+        else if (dim > 32)
+          fstdistfunc_ = L2SqrAtLeastSimd<SIMD_ARCH::AVX512, data_t, 32, scalefactor>;
+        else if (dim > 16)
+          fstdistfunc_ = L2SqrAtLeastSimd<SIMD_ARCH::AVX512, data_t, 16, scalefactor>;
+      }
+
 
       }
 

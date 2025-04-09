@@ -139,12 +139,12 @@ void testSimdDistanceCalulations() {
           Int8DistanceFn NonSimdDistanceFn, SimdDistanceFn, SimdDistanceAtLeastFn;
           if (spaceType == SpaceType::Euclidean) {
             NonSimdDistanceFn = hnswlib::L2Sqr<float, int8_t, 1, std::ratio<1,1>>;
-            SimdDistanceFn = hnswlib::L2SqrSimd<arch, int8_t, std::ratio<1,1>>;
-            SimdDistanceAtLeastFn = hnswlib::L2SqrAtLeastSimd<arch, int8_t, std::ratio<1,1>>;
+            SimdDistanceFn = hnswlib::L2SqrSimd<arch, int8_t, 16, std::ratio<1,1>>;
+            SimdDistanceAtLeastFn = hnswlib::L2SqrAtLeastSimd<arch, int8_t, 16, std::ratio<1,1>>;
           } else {
             NonSimdDistanceFn = hnswlib::InnerProduct<float, int8_t, 1, std::ratio<1,1>>;
-            SimdDistanceFn = hnswlib::InnerProductSimd<arch, int8_t, std::ratio<1,1>>;
-            SimdDistanceAtLeastFn = hnswlib::InnerProductAtLeastSimd<arch, int8_t, std::ratio<1,1>>;
+            SimdDistanceFn = hnswlib::InnerProductSimd<arch, int8_t, 16, std::ratio<1,1>>;
+            SimdDistanceAtLeastFn = hnswlib::InnerProductAtLeastSimd<arch, int8_t, 16, std::ratio<1,1>>;
           }
           testData = std::make_tuple(v1, v2, NonSimdDistanceFn, SimdDistanceFn, SimdDistanceAtLeastFn);
         } else if (storageType == StorageDataType::E4M3) {
@@ -153,12 +153,12 @@ void testSimdDistanceCalulations() {
           E4M3DistanceFn NonSimdDistanceFn, SimdDistanceFn, SimdDistanceAtLeastFn;
           if (spaceType == SpaceType::Euclidean) {
             NonSimdDistanceFn = hnswlib::L2Sqr<float, E4M3, 1, std::ratio<1,1>>;
-            SimdDistanceFn = hnswlib::L2SqrSimd<arch, E4M3, std::ratio<1,1>>;
-            SimdDistanceAtLeastFn = hnswlib::L2SqrAtLeastSimd<arch, E4M3, std::ratio<1,1>>;
+            SimdDistanceFn = hnswlib::L2SqrSimd<arch, E4M3, 16, std::ratio<1,1>>;
+            SimdDistanceAtLeastFn = hnswlib::L2SqrAtLeastSimd<arch, E4M3, 16, std::ratio<1,1>>;
           } else {
             NonSimdDistanceFn = hnswlib::InnerProduct<float, E4M3, 1, std::ratio<1,1>>;
-            SimdDistanceFn = hnswlib::InnerProductSimd<arch, E4M3, std::ratio<1,1>>;
-            SimdDistanceAtLeastFn = hnswlib::InnerProductAtLeastSimd<arch, E4M3, std::ratio<1,1>>;
+            SimdDistanceFn = hnswlib::InnerProductSimd<arch, E4M3, 16, std::ratio<1,1>>;
+            SimdDistanceAtLeastFn = hnswlib::InnerProductAtLeastSimd<arch, E4M3, 16, std::ratio<1,1>>;
           }
           testData = std::make_tuple(v1, v2, NonSimdDistanceFn, SimdDistanceFn, SimdDistanceAtLeastFn);
         } else if (storageType == StorageDataType::Float32) {
@@ -167,12 +167,12 @@ void testSimdDistanceCalulations() {
           FloatDistanceFn NonSimdDistanceFn, SimdDistanceFn, SimdDistanceAtLeastFn;
           if (spaceType == SpaceType::Euclidean) {
             NonSimdDistanceFn = hnswlib::L2Sqr<float, float, 1, std::ratio<1,1>>;
-            SimdDistanceFn = hnswlib::L2SqrSimd<arch, float, std::ratio<1,1>>;
-            SimdDistanceAtLeastFn = hnswlib::L2SqrAtLeastSimd<arch, float, std::ratio<1,1>>;
+            SimdDistanceFn = hnswlib::L2SqrSimd<arch, float, 16, std::ratio<1,1>>;
+            SimdDistanceAtLeastFn = hnswlib::L2SqrAtLeastSimd<arch, float, 16, std::ratio<1,1>>;
           } else {
             NonSimdDistanceFn = hnswlib::InnerProduct<float, float, 1, std::ratio<1,1>>;
-            SimdDistanceFn = hnswlib::InnerProductSimd<arch, float, std::ratio<1,1>>;
-            SimdDistanceAtLeastFn = hnswlib::InnerProductAtLeastSimd<arch, float, std::ratio<1,1>>;
+            SimdDistanceFn = hnswlib::InnerProductSimd<arch, float, 16, std::ratio<1,1>>;
+            SimdDistanceAtLeastFn = hnswlib::InnerProductAtLeastSimd<arch, float, 16, std::ratio<1,1>>;
           }
           testData = std::make_tuple(v1, v2, NonSimdDistanceFn, SimdDistanceFn, SimdDistanceAtLeastFn);
         }
