@@ -185,7 +185,7 @@ public:
     else
       fstdistfunc_ = L2Sqr<dist_t, data_t, 1, scalefactor>;
 
-    if constexpr (std::is_same<dist_t, float>::value) {
+    if constexpr (std::is_same<dist_t, float>::value && false) {
 
       SIMD_ARCH simd_arch = getX86SimdArch();
 

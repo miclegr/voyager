@@ -91,7 +91,7 @@ static float InnerProductWithoutScaleSimd(const data_t *__restrict pVect1,
 
   static_assert(K % Simd::floatsPerLine == 0, "" );
 
-  if constexpr (arch == SIMD_ARCH::SSE) {
+  if constexpr (arch == SIMD_ARCH::SSE && false) {
     res = [&]() PORTABLE_TARGET_SSE {
 
       register_t accumulator = Simd::newAccumulator();
