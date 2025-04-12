@@ -278,13 +278,13 @@ SimdType<AVX2>::loadAndConvertToFloat(E4M3 const *data) {
   __m256i is_subnormal = _mm256_cmpeq_epi32(
       _mm256_and_si256(e4m3_vector_32, exponent_mask), _mm256_setzero_si256());
 
-  __m256i nan_pattern =
-      _mm256_srli_epi32(_mm256_or_si256(exponent_mask, mantissa_mask), 1);
-  __m256i is_nan =
-      _mm256_cmpeq_epi32(_mm256_srli_epi32(e4m3_vector_32, 1), nan_pattern);
+  //__m256i nan_pattern =
+  //    _mm256_srli_epi32(_mm256_or_si256(exponent_mask, mantissa_mask), 1);
+  //__m256i is_nan =
+  //    _mm256_cmpeq_epi32(_mm256_srli_epi32(e4m3_vector_32, 1), nan_pattern);
 
-  __m256 is_subnormal_or_nan =
-      _mm256_castsi256_ps(_mm256_or_si256(is_subnormal, is_nan));
+  __m256 is_subnormal_or_nan = _mm256_castsi256_ps(is_subnormal);
+  //    _mm256_castsi256_ps(_mm256_or_si256(is_subnormal, is_nan));
 
   __m256i blended = _mm256_castps_si256(_mm256_blendv_ps(
       unsigned_normal, unsigned_subnormal, is_subnormal_or_nan));
